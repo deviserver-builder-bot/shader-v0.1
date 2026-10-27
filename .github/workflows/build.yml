@@ -1,0 +1,62 @@
+name: Compilar Umami Visuals
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Preparar el codigo (descomprime el zip si esta en el repositorio)
+        run: |
+          ZIP=$(ls umami-visuals-*-fuente.zip 2>/dev/null | sort | tail -n 1)
+          if [ -n "$ZIP" ]; then
+            echo "Usando $ZIP"
+            unzip -q -o "$ZIP"
+          fi
+          if [ -d umami-visuals/src ]; then
+            echo "SRC=umami-visuals" >> "$GITHUB_ENV"
+          else
+            echo "SRC=." >> "$GITHUB_ENV"
+          fi
+
+      - name: Instalar herramientas
+        run: python -m pip install -r "$SRC/requirements.txt"
+
+      - name: Descargar compilador de shaders y materiales base
+        working-directory: ${{ env.SRC }}
+        run: bash build.sh setup
+
+      - name: Compilar pack para Android
+        working-directory: ${{ env.SRC }}
+        run: bash build.sh pack -p android
+
+      - name: Compilar pack multiplataforma (Android + Windows + iOS)
+        continue-on-error: true
+        working-directory: ${{ env.SRC }}
+        run: bash build.sh pack -p multiplatform
+
+      - name: Subir .mcpack (descargable desde la pestana Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: umami-visuals
+          path: ${{ env.SRC }}/build/*.mcpack
+
+      - name: Publicar version (al crear una etiqueta v0.3, v0.4...)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.SRC }}/build/*.mcpack
+          generate_release_notes: true
